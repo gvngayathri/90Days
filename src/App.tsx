@@ -29,7 +29,9 @@ import {
   Trash2,
   X,
   Save,
-  CalendarPlus
+  CalendarPlus,
+  Download,
+  Upload
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -84,21 +86,21 @@ const TaskCard: React.FC<TaskCardProps> = ({
           ref={provided.innerRef}
           {...provided.draggableProps}
           {...provided.dragHandleProps}
+          style={{
+            ...provided.draggableProps.style,
+            // Optimization: disable transitions during drag to prevent "ghosting"
+            transition: snapshot.isDragging ? 'none' : provided.draggableProps.style?.transition,
+          }}
           className={cn(
-            "transition-transform",
+            "relative mb-3 last:mb-0",
             snapshot.isDragging && "z-[100]"
           )}
         >
-          <motion.div
-            layout
-            initial={{ opacity: 0, y: 10, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.98 }}
-            whileHover={{ y: -2 }}
+          <div
             className={cn(
               "group relative bg-white/[0.03] border border-white/10 rounded-xl p-3 transition-all hover:bg-white/[0.06] hover:border-white/20 shadow-sm",
               task.done && "opacity-50 grayscale-[0.3]",
-              snapshot.isDragging && "bg-white/[0.1] border-[#d6aa55]/50 shadow-2xl scale-105"
+              snapshot.isDragging && "bg-white/[0.1] border-[#d6aa55]/50 shadow-2xl scale-[1.02] ring-2 ring-[#d6aa55]/20"
             )}
           >
             <div className="flex flex-col gap-2">
@@ -199,7 +201,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
                 </div>
               )}
             </div>
-          </motion.div>
+          </div>
         </div>
       )}
     </Draggable>
@@ -392,6 +394,57 @@ export default function App() {
     setEndDate(prev => addMonths(prev, 1));
   };
 
+  const exportTasks = () => {
+    const dataStr = JSON.stringify(tasks, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `yousquared-tasks-${format(new Date(), 'yyyy-MM-dd')}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const importTasks = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const importedTasks = JSON.parse(content);
+        
+        if (Array.isArray(importedTasks)) {
+          // Basic validation: check if first item has required fields
+          if (importedTasks.length > 0) {
+            const first = importedTasks[0];
+            if (!first.id || !first.title || !first.category || !first.date) {
+              throw new Error('Invalid task format');
+            }
+          }
+          
+          if (confirm(`Are you sure you want to import ${importedTasks.length} tasks? This will merge with your current tasks.`)) {
+            setTasks(prev => {
+              // Avoid duplicates by ID
+              const existingIds = new Set(prev.map(t => t.id));
+              const newTasks = importedTasks.filter(t => !existingIds.has(t.id));
+              return [...prev, ...newTasks];
+            });
+          }
+        }
+      } catch (err) {
+        alert('Failed to import tasks. Please ensure the file is a valid YouSquared export.');
+        console.error(err);
+      }
+    };
+    reader.readAsText(file);
+    // Reset input
+    event.target.value = '';
+  };
+
   const nextWeek = () => setCurrentDate(prev => addWeeks(prev, 1));
   const prevWeek = () => setCurrentDate(prev => subWeeks(prev, 1));
   const goToToday = () => setCurrentDate(new Date());
@@ -458,6 +511,20 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
+            <div className="hidden lg:flex items-center gap-2 bg-white/5 rounded-lg p-1 border border-white/10 mr-2">
+              <button 
+                onClick={exportTasks}
+                className="p-2 hover:bg-white/10 rounded-md transition-colors text-white/40 hover:text-[#d6aa55]"
+                title="Export Tasks"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+              <label className="p-2 hover:bg-white/10 rounded-md transition-colors text-white/40 hover:text-[#d6aa55] cursor-pointer" title="Import Tasks">
+                <Upload className="w-4 h-4" />
+                <input type="file" accept=".json" onChange={importTasks} className="hidden" />
+              </label>
+            </div>
+
             <div className="hidden lg:flex bg-white/5 rounded-lg p-1 border border-white/10">
               {(['all', 'job', 'fitness', 'yousquared'] as const).map((cat) => (
                 <button
@@ -530,24 +597,22 @@ export default function App() {
                         {...provided.droppableProps}
                         ref={provided.innerRef}
                         className={cn(
-                          "flex-1 flex flex-col gap-3 min-h-[100px] transition-colors rounded-xl",
+                          "flex-1 flex flex-col min-h-[100px] transition-colors rounded-xl",
                           snapshot.isDraggingOver && "bg-white/[0.02]"
                         )}
                       >
-                        <AnimatePresence mode="popLayout">
-                          {dayTasks.map((task, index) => (
-                            <TaskCard 
-                              key={task.id} 
-                              task={task} 
-                              index={index}
-                              onToggle={() => toggleTask(task.id)}
-                              onMove={(targetDay) => moveTask(task.id, targetDay)}
-                              onEdit={(t) => { setEditingTask(t); setIsModalOpen(true); }}
-                              onDelete={deleteTask}
-                              weekDays={weekDays}
-                            />
-                          ))}
-                        </AnimatePresence>
+                        {dayTasks.map((task, index) => (
+                          <TaskCard 
+                            key={task.id} 
+                            task={task} 
+                            index={index}
+                            onToggle={() => toggleTask(task.id)}
+                            onMove={(targetDay) => moveTask(task.id, targetDay)}
+                            onEdit={(t) => { setEditingTask(t); setIsModalOpen(true); }}
+                            onDelete={deleteTask}
+                            weekDays={weekDays}
+                          />
+                        ))}
                         {provided.placeholder}
                         
                         {dayTasks.length === 0 && !snapshot.isDraggingOver && (
