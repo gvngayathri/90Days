@@ -608,7 +608,7 @@ export default function App() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-[1800px] mx-auto p-4 sm:p-6">
+      <main className="max-w-[1800px] mx-auto p-4 sm:p-6 pb-40 lg:pb-24">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4 min-h-[calc(100vh-12rem)]">
             {weekDays.map((day) => {
               const dateStr = format(day, 'yyyy-MM-dd');
@@ -681,28 +681,12 @@ export default function App() {
             })}
           </div>
 
-          {/* Weekly Affirmation */}
-          <div className="mt-12 mb-24 px-4">
-            <div className="max-w-3xl mx-auto text-center">
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#d6aa55]/10 border border-[#d6aa55]/20 rounded-full mb-4">
-                <Zap className="w-3 h-3 text-[#d6aa55]" />
-                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#d6aa55]">Weekly Affirmation</span>
-              </div>
-              <motion.p 
-                key={weeklyAffirmation}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="text-xl sm:text-2xl font-serif italic text-white/80 leading-relaxed"
-              >
-                "{weeklyAffirmation}"
-              </motion.p>
-            </div>
-          </div>
+          {/* Weekly Affirmation removed from here */}
         </main>
 
       {/* Footer Stats */}
       <footer className="fixed bottom-0 left-0 right-0 bg-[#191102]/95 backdrop-blur-2xl border-t border-white/10 py-4 px-6 sm:px-8 z-40">
-        <div className="max-w-[1800px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="max-w-[1800px] mx-auto flex flex-col lg:flex-row items-center justify-between gap-4">
           <div className="flex flex-wrap justify-center gap-4 sm:gap-8">
             <div className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-[#3b82f6]" />
@@ -718,6 +702,21 @@ export default function App() {
             </div>
           </div>
 
+          {/* Weekly Affirmation - Compact in Footer */}
+          <div className="flex flex-1 items-center justify-center px-4 lg:px-8 border-y lg:border-y-0 lg:border-x border-white/5 my-4 lg:my-0 py-2 lg:py-0 mx-2 lg:mx-4">
+            <div className="flex items-center gap-3 max-w-2xl">
+              <Zap className="w-3 h-3 text-[#d6aa55] shrink-0" />
+              <motion.p 
+                key={weeklyAffirmation}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-[11px] font-serif italic text-white/60 text-center lg:text-left"
+              >
+                "{weeklyAffirmation}"
+              </motion.p>
+            </div>
+          </div>
+
           <div className="flex items-center gap-6">
             <button 
               onClick={extendCalendar}
@@ -728,7 +727,7 @@ export default function App() {
             </button>
 
             <div className="flex items-center gap-4">
-              <div className="h-1 w-32 sm:w-48 bg-white/5 rounded-full overflow-hidden border border-white/10">
+              <div className="h-1 w-20 sm:w-32 bg-white/5 rounded-full overflow-hidden border border-white/10">
                 <motion.div 
                   className="h-full bg-[#d6aa55]"
                   initial={{ width: 0 }}
