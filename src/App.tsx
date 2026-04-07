@@ -31,7 +31,8 @@ import {
   Save,
   CalendarPlus,
   Download,
-  Upload
+  Upload,
+  Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -43,6 +44,7 @@ import {
 import { INITIAL_DATA } from './data';
 import { Task, Category, Phase } from './types';
 import { cn } from './lib/utils';
+import { AFFIRMATIONS } from './constants';
 
 const COLORS = {
   gold: '#d6aa55',
@@ -81,17 +83,27 @@ const TaskCard: React.FC<TaskCardProps> = ({
 
   return (
     <Draggable draggableId={task.id} index={index}>
-      {(provided, snapshot) => (
-        <div
-          ref={provided.innerRef}
-          {...provided.draggableProps}
-          {...provided.dragHandleProps}
-          style={{
-            ...provided.draggableProps.style,
-            transition: 'none'
-          }}
-          className="relative mb-3 last:mb-0"
-        >
+      {(provided, snapshot) => {
+        // Close menu if drag starts
+        if (snapshot.isDragging && isMenuOpen) {
+          setIsMenuOpen(false);
+        }
+
+        return (
+          <div
+            ref={provided.innerRef}
+            {...provided.draggableProps}
+            {...provided.dragHandleProps}
+            style={{
+              ...provided.draggableProps.style,
+              // Force pointer events to auto when not dragging to prevent "frozen" state
+              pointerEvents: snapshot.isDragging ? ((provided.draggableProps.style as any)?.pointerEvents || 'none') : 'auto'
+            }}
+            className={cn(
+              "relative mb-3 last:mb-0 force-pointer-events",
+              snapshot.isDragging && "z-50"
+            )}
+          >
           <div
             className={cn(
               "group relative bg-white/[0.03] border border-white/10 rounded-xl p-3 hover:bg-white/[0.06] hover:border-white/20 shadow-sm",
@@ -198,9 +210,10 @@ const TaskCard: React.FC<TaskCardProps> = ({
             </div>
           </div>
         </div>
-      )}
-    </Draggable>
-  );
+      );
+    }}
+  </Draggable>
+);
 };
 
 interface TaskModalProps {
@@ -348,6 +361,16 @@ export default function App() {
     return Array.from({ length: 7 }).map((_, i) => addDays(weekStart, i));
   }, [weekStart]);
 
+  const weeklyAffirmation = useMemo(() => {
+    const dateStr = format(weekStart, 'yyyy-MM-dd');
+    let hash = 0;
+    for (let i = 0; i < dateStr.length; i++) {
+      hash = ((hash << 5) - hash) + dateStr.charCodeAt(i);
+      hash |= 0;
+    }
+    return AFFIRMATIONS[Math.abs(hash) % AFFIRMATIONS.length];
+  }, [weekStart]);
+
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => filter === 'all' || t.category === filter);
   }, [tasks, filter]);
@@ -445,30 +468,55 @@ export default function App() {
   const goToToday = useCallback(() => setCurrentDate(new Date()), []);
 
   const onDragEnd = useCallback((result: DropResult) => {
-    console.log('Drag ended:', result);
     const { destination, source, draggableId } = result;
 
-    if (!destination) {
-      console.log('No destination');
-      return;
-    }
+    if (!destination) return;
 
     if (
       destination.droppableId === source.droppableId &&
       destination.index === source.index
     ) {
-      console.log('Dropped in same position');
       return;
     }
 
     const taskId = draggableId;
     const newDate = destination.droppableId;
     
-    console.log(`Moving task ${taskId} to ${newDate}`);
-    
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, date: newDate } : t));
-    console.log('State updated');
-  }, []);
+    // Update state immediately to prevent the "flash" glitch
+    setTasks(prev => {
+      const taskIndex = prev.findIndex(t => t.id === taskId);
+      if (taskIndex === -1) return prev;
+      
+      const newTasks = [...prev];
+      const [task] = newTasks.splice(taskIndex, 1);
+      const updatedTask = { ...task, date: newDate };
+      
+      // Find the correct insertion point in the global list, 
+      // accounting for the current filter
+      const dayFilteredTasks = prev.filter(t => 
+        t.date === newDate && 
+        t.id !== taskId && 
+        (filter === 'all' || t.category === filter)
+      );
+
+      if (destination.index >= dayFilteredTasks.length) {
+        return [...newTasks, updatedTask];
+      } else {
+        const targetTask = dayFilteredTasks[destination.index];
+        const targetIndex = newTasks.findIndex(t => t.id === targetTask.id);
+        newTasks.splice(targetIndex, 0, updatedTask);
+        return newTasks;
+      }
+    });
+
+    // Force pointer events and reflow immediately after state update
+    // to ensure the UI remains interactive without the "frozen" issue.
+    document.body.style.pointerEvents = 'auto';
+    requestAnimationFrame(() => {
+      window.scrollBy(0, 1);
+      window.scrollBy(0, -1);
+    });
+  }, [filter]);
 
   const onEditTask = useCallback((t: Task) => {
     setEditingTask(t);
@@ -604,10 +652,11 @@ export default function App() {
                         {...provided.droppableProps}
                         ref={provided.innerRef}
                         className="flex-1 flex flex-col min-h-[100px] rounded-xl"
+                        style={{ pointerEvents: 'auto' }}
                       >
                         {dayTasks.map((task, index) => (
                           <TaskCard 
-                            key={task.id} 
+                            key={`${task.id}-${task.date}-${index}`} 
                             task={task} 
                             index={index}
                             onToggle={toggleTask}
@@ -630,6 +679,24 @@ export default function App() {
                 </div>
               );
             })}
+          </div>
+
+          {/* Weekly Affirmation */}
+          <div className="mt-12 mb-24 px-4">
+            <div className="max-w-3xl mx-auto text-center">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#d6aa55]/10 border border-[#d6aa55]/20 rounded-full mb-4">
+                <Zap className="w-3 h-3 text-[#d6aa55]" />
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#d6aa55]">Weekly Affirmation</span>
+              </div>
+              <motion.p 
+                key={weeklyAffirmation}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-xl sm:text-2xl font-serif italic text-white/80 leading-relaxed"
+              >
+                "{weeklyAffirmation}"
+              </motion.p>
+            </div>
           </div>
         </main>
 
