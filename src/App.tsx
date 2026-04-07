@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   format, 
   startOfWeek, 
@@ -59,8 +59,8 @@ const CATEGORY_CONFIG: Record<Category, { icon: any; label: string; color: strin
 interface TaskCardProps {
   task: Task;
   index: number;
-  onToggle: () => void;
-  onMove: (date: Date) => void;
+  onToggle: (id: string) => void;
+  onMove: (id: string, date: Date) => void;
   onEdit: (task: Task) => void;
   onDelete: (id: string) => void;
   weekDays: Date[];
@@ -88,19 +88,14 @@ const TaskCard: React.FC<TaskCardProps> = ({
           {...provided.dragHandleProps}
           style={{
             ...provided.draggableProps.style,
-            // Optimization: disable transitions during drag to prevent "ghosting"
-            transition: snapshot.isDragging ? 'none' : provided.draggableProps.style?.transition,
+            transition: 'none'
           }}
-          className={cn(
-            "relative mb-3 last:mb-0",
-            snapshot.isDragging && "z-[100]"
-          )}
+          className="relative mb-3 last:mb-0"
         >
           <div
             className={cn(
-              "group relative bg-white/[0.03] border border-white/10 rounded-xl p-3 transition-all hover:bg-white/[0.06] hover:border-white/20 shadow-sm",
-              task.done && "opacity-50 grayscale-[0.3]",
-              snapshot.isDragging && "bg-white/[0.1] border-[#d6aa55]/50 shadow-2xl scale-[1.02] ring-2 ring-[#d6aa55]/20"
+              "group relative bg-white/[0.03] border border-white/10 rounded-xl p-3 hover:bg-white/[0.06] hover:border-white/20 shadow-sm",
+              task.done && "opacity-50 grayscale-[0.3]"
             )}
           >
             <div className="flex flex-col gap-2">
@@ -114,7 +109,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
                 <div className="relative shrink-0 flex items-center gap-1">
                   <button 
                     onClick={(e) => { e.stopPropagation(); setIsMenuOpen(!isMenuOpen); }}
-                    className="p-1 hover:bg-white/10 rounded-md transition-all"
+                    className="p-1 hover:bg-white/10 rounded-md"
                   >
                     <MoreVertical className="w-3.5 h-3.5 text-white/30" />
                   </button>
@@ -125,7 +120,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
                       <div className="absolute right-0 top-full mt-1 w-44 bg-[#191102] border border-white/10 rounded-lg shadow-2xl z-[70] p-1 overflow-hidden backdrop-blur-xl">
                         <button
                           onClick={() => { onEdit(task); setIsMenuOpen(false); }}
-                          className="w-full text-left px-3 py-2 text-xs hover:bg-white/5 transition-colors flex items-center gap-2"
+                          className="w-full text-left px-3 py-2 text-xs hover:bg-white/5 flex items-center gap-2"
                         >
                           <Edit2 className="w-3.5 h-3.5 text-white/40" />
                           <span>Edit Task</span>
@@ -138,8 +133,8 @@ const TaskCard: React.FC<TaskCardProps> = ({
                           {weekDays.map((day) => (
                             <button
                               key={day.toISOString()}
-                              onClick={() => { onMove(day); setIsMenuOpen(false); }}
-                              className="w-full text-left px-3 py-1.5 text-[10px] hover:bg-white/5 transition-colors flex items-center justify-between"
+                              onClick={() => { onMove(task.id, day); setIsMenuOpen(false); }}
+                              className="w-full text-left px-3 py-1.5 text-[10px] hover:bg-white/5 flex items-center justify-between"
                             >
                               <span>{format(day, 'EEE, MMM d')}</span>
                               {isSameDay(parseISO(task.date), day) && (
@@ -151,7 +146,7 @@ const TaskCard: React.FC<TaskCardProps> = ({
                         <div className="h-px bg-white/5 my-1" />
                         <button
                           onClick={() => { onDelete(task.id); setIsMenuOpen(false); }}
-                          className="w-full text-left px-3 py-2 text-xs hover:bg-red-500/10 text-red-400 transition-colors flex items-center gap-2"
+                          className="w-full text-left px-3 py-2 text-xs hover:bg-red-500/10 text-red-400 flex items-center gap-2"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>Delete Task</span>
@@ -165,9 +160,9 @@ const TaskCard: React.FC<TaskCardProps> = ({
               {/* Middle Row: Checkbox & Title */}
               <div className="flex gap-2.5">
                 <button 
-                  onClick={(e) => { e.stopPropagation(); onToggle(); }}
+                  onClick={(e) => { e.stopPropagation(); onToggle(task.id); }}
                   className={cn(
-                    "mt-0.5 shrink-0 transition-all transform active:scale-90",
+                    "mt-0.5 shrink-0",
                     task.done ? "text-[#d6aa55]" : "text-white/20 hover:text-white/40"
                   )}
                 >
@@ -357,21 +352,21 @@ export default function App() {
     return tasks.filter(t => filter === 'all' || t.category === filter);
   }, [tasks, filter]);
 
-  const toggleTask = (id: string) => {
+  const toggleTask = useCallback((id: string) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
-  };
+  }, []);
 
-  const moveTask = (id: string, newDate: Date) => {
+  const moveTask = useCallback((id: string, newDate: Date) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, date: format(newDate, 'yyyy-MM-dd') } : t));
-  };
+  }, []);
 
-  const deleteTask = (id: string) => {
+  const deleteTask = useCallback((id: string) => {
     if (confirm('Are you sure you want to delete this task?')) {
       setTasks(prev => prev.filter(t => t.id !== id));
     }
-  };
+  }, []);
 
-  const handleSaveTask = (taskData: Partial<Task>) => {
+  const handleSaveTask = useCallback((taskData: Partial<Task>) => {
     if (editingTask) {
       setTasks(prev => prev.map(t => t.id === editingTask.id ? { ...t, ...taskData } as Task : t));
     } else {
@@ -388,13 +383,13 @@ export default function App() {
     }
     setIsModalOpen(false);
     setEditingTask(null);
-  };
+  }, [editingTask]);
 
-  const extendCalendar = () => {
+  const extendCalendar = useCallback(() => {
     setEndDate(prev => addMonths(prev, 1));
-  };
+  }, []);
 
-  const exportTasks = () => {
+  const exportTasks = useCallback(() => {
     const dataStr = JSON.stringify(tasks, null, 2);
     const dataBlob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(dataBlob);
@@ -405,9 +400,9 @@ export default function App() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  };
+  }, [tasks]);
 
-  const importTasks = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const importTasks = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -443,36 +438,49 @@ export default function App() {
     reader.readAsText(file);
     // Reset input
     event.target.value = '';
-  };
+  }, []);
 
-  const nextWeek = () => setCurrentDate(prev => addWeeks(prev, 1));
-  const prevWeek = () => setCurrentDate(prev => subWeeks(prev, 1));
-  const goToToday = () => setCurrentDate(new Date());
+  const nextWeek = useCallback(() => setCurrentDate(prev => addWeeks(prev, 1)), []);
+  const prevWeek = useCallback(() => setCurrentDate(prev => subWeeks(prev, 1)), []);
+  const goToToday = useCallback(() => setCurrentDate(new Date()), []);
 
-  const onDragEnd = (result: DropResult) => {
+  const onDragEnd = useCallback((result: DropResult) => {
+    console.log('Drag ended:', result);
     const { destination, source, draggableId } = result;
 
-    if (!destination) return;
+    if (!destination) {
+      console.log('No destination');
+      return;
+    }
 
     if (
       destination.droppableId === source.droppableId &&
       destination.index === source.index
     ) {
+      console.log('Dropped in same position');
       return;
     }
 
-    // Move task to new date
     const taskId = draggableId;
-    const newDate = destination.droppableId; // droppableId is the date string
+    const newDate = destination.droppableId;
+    
+    console.log(`Moving task ${taskId} to ${newDate}`);
     
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, date: newDate } : t));
-  };
+    console.log('State updated');
+  }, []);
+
+  const onEditTask = useCallback((t: Task) => {
+    setEditingTask(t);
+    setIsModalOpen(true);
+  }, []);
 
   const totalDays = differenceInDays(endDate, parseISO(INITIAL_DATA.startDate)) + 1;
   const currentProgress = Math.round((tasks.filter(t => t.done).length / tasks.length) * 100);
 
   return (
-    <div className="min-h-screen bg-[#191102] text-white font-sans selection:bg-[#d6aa55] selection:text-[#191102]">
+    <DragDropContext onDragEnd={onDragEnd}>
+      <div className="min-h-screen bg-[#191102] text-white font-sans selection:bg-[#d6aa55] selection:text-[#191102]">
       {/* Header */}
       <header className="border-b border-white/10 bg-[#191102]/80 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-[1800px] mx-auto px-6 h-20 flex items-center justify-between">
@@ -541,20 +549,19 @@ export default function App() {
                 </button>
               ))}
             </div>
-            <button 
-              onClick={() => { setEditingTask(null); setDefaultDate(undefined); setIsModalOpen(true); }}
-              className="w-10 h-10 bg-[#d6aa55] text-[#191102] rounded-lg flex items-center justify-center hover:scale-105 transition-transform shadow-lg shadow-[#d6aa55]/20"
-            >
-              <Plus className="w-6 h-6" />
-            </button>
+              <button 
+                onClick={() => { setEditingTask(null); setDefaultDate(undefined); setIsModalOpen(true); }}
+                className="w-10 h-10 bg-[#d6aa55] text-[#191102] rounded-lg flex items-center justify-center shadow-lg shadow-[#d6aa55]/20"
+              >
+                <Plus className="w-6 h-6" />
+              </button>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-[1800px] mx-auto p-4 sm:p-6">
-        <DragDropContext onDragEnd={onDragEnd}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4 min-h-[calc(100vh-12rem)]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4 min-h-[calc(100vh-12rem)]">
             {weekDays.map((day) => {
               const dateStr = format(day, 'yyyy-MM-dd');
               const dayTasks = filteredTasks.filter(t => t.date === dateStr);
@@ -564,7 +571,7 @@ export default function App() {
                 <div 
                   key={day.toISOString()} 
                   className={cn(
-                    "flex flex-col gap-4 rounded-2xl p-4 transition-all border",
+                    "flex flex-col gap-4 rounded-2xl p-4 border",
                     isDayToday 
                       ? "bg-white/[0.03] border-[#d6aa55]/30 shadow-[0_0_40px_-15px_rgba(214,170,85,0.1)]" 
                       : "bg-transparent border-white/5"
@@ -584,38 +591,35 @@ export default function App() {
                     </div>
                     <button 
                       onClick={() => { setEditingTask(null); setDefaultDate(dateStr); setIsModalOpen(true); }}
-                      className="p-2 bg-white/5 hover:bg-[#d6aa55]/20 hover:text-[#d6aa55] rounded-lg transition-all text-white/20"
+                      className="p-2 bg-white/5 hover:bg-[#d6aa55]/20 hover:text-[#d6aa55] rounded-lg text-white/20"
                       title="Add Task"
                     >
                       <Plus className="w-4 h-4" />
                     </button>
                   </div>
 
-                  <Droppable droppableId={dateStr}>
+                  <Droppable droppableId={dateStr} type="TASK">
                     {(provided, snapshot) => (
                       <div 
                         {...provided.droppableProps}
                         ref={provided.innerRef}
-                        className={cn(
-                          "flex-1 flex flex-col min-h-[100px] transition-colors rounded-xl",
-                          snapshot.isDraggingOver && "bg-white/[0.02]"
-                        )}
+                        className="flex-1 flex flex-col min-h-[100px] rounded-xl"
                       >
                         {dayTasks.map((task, index) => (
                           <TaskCard 
                             key={task.id} 
                             task={task} 
                             index={index}
-                            onToggle={() => toggleTask(task.id)}
-                            onMove={(targetDay) => moveTask(task.id, targetDay)}
-                            onEdit={(t) => { setEditingTask(t); setIsModalOpen(true); }}
+                            onToggle={toggleTask}
+                            onMove={moveTask}
+                            onEdit={onEditTask}
                             onDelete={deleteTask}
                             weekDays={weekDays}
                           />
                         ))}
                         {provided.placeholder}
                         
-                        {dayTasks.length === 0 && !snapshot.isDraggingOver && (
+                        {dayTasks.length === 0 && (
                           <div className="flex-1 flex items-center justify-center border border-dashed border-white/5 rounded-xl opacity-20 py-8">
                             <p className="text-[9px] uppercase tracking-[0.3em] font-bold">Rest</p>
                           </div>
@@ -627,8 +631,7 @@ export default function App() {
               );
             })}
           </div>
-        </DragDropContext>
-      </main>
+        </main>
 
       {/* Footer Stats */}
       <footer className="fixed bottom-0 left-0 right-0 bg-[#191102]/95 backdrop-blur-2xl border-t border-white/10 py-4 px-6 sm:px-8 z-40">
@@ -651,9 +654,9 @@ export default function App() {
           <div className="flex items-center gap-6">
             <button 
               onClick={extendCalendar}
-              className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-all group"
+              className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg group"
             >
-              <CalendarPlus className="w-4 h-4 text-[#d6aa55] group-hover:scale-110 transition-transform" />
+              <CalendarPlus className="w-4 h-4 text-[#d6aa55]" />
               <span className="text-[10px] font-bold uppercase tracking-widest">Extend Plan</span>
             </button>
 
@@ -681,6 +684,7 @@ export default function App() {
         defaultDate={defaultDate}
       />
     </div>
+    </DragDropContext>
   );
 }
 
