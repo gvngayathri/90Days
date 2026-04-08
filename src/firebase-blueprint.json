@@ -1,0 +1,27 @@
+{
+  "entities": {
+    "Task": {
+      "title": "Task",
+      "description": "A task in the 90-day transformation plan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique task ID" },
+        "title": { "type": "string", "description": "Task title" },
+        "notes": { "type": "string", "description": "Additional notes" },
+        "category": { "type": "string", "enum": ["job", "fitness", "yousquared"], "description": "Task category" },
+        "phase": { "type": "string", "enum": ["Stabilize", "Build", "Convert"], "description": "Transformation phase" },
+        "date": { "type": "string", "format": "date", "description": "Target date (YYYY-MM-DD)" },
+        "done": { "type": "boolean", "description": "Completion status" },
+        "userId": { "type": "string", "description": "Owner's UID" },
+        "order": { "type": "number", "description": "Display order within the day" }
+      },
+      "required": ["id", "title", "category", "date", "userId"]
+    }
+  },
+  "firestore": {
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Collection of tasks"
+    }
+  }
+}

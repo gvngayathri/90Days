@@ -32,7 +32,9 @@ import {
   CalendarPlus,
   Download,
   Upload,
-  Zap
+  Zap,
+  LogOut,
+  LogIn
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -45,6 +47,23 @@ import { INITIAL_DATA } from './data';
 import { Task, Category, Phase } from './types';
 import { cn } from './lib/utils';
 import { AFFIRMATIONS } from './constants';
+import { 
+  db, 
+  auth, 
+  googleProvider, 
+  signInWithPopup, 
+  signOut,
+  collection,
+  doc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  where,
+  orderBy
+} from './firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
 
 const COLORS = {
   gold: '#d6aa55',
@@ -346,7 +365,9 @@ const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, onSave, initialT
 };
 
 export default function App() {
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_DATA.tasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date('2026-04-09'));
   const [filter, setFilter] = useState<Category | 'all'>('all');
   const [endDate, setEndDate] = useState(new Date('2026-07-07'));
@@ -354,6 +375,51 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [defaultDate, setDefaultDate] = useState<string | undefined>();
+
+  // Auth Listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Firestore Sync
+  useEffect(() => {
+    if (!user) {
+      setTasks([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'tasks'),
+      where('userId', '==', user.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const taskList: Task[] = [];
+      snapshot.forEach((doc) => {
+        taskList.push(doc.data() as Task);
+      });
+      // Sort by order if needed, or just use Firestore ordering
+      setTasks(taskList.sort((a, b) => (a.order || 0) - (b.order || 0)));
+    }, (error) => {
+      console.error("Firestore Error:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const login = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      console.error("Login Error:", error);
+    }
+  };
+
+  const logout = () => signOut(auth);
 
   // Calculate the week range
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
@@ -375,38 +441,46 @@ export default function App() {
     return tasks.filter(t => filter === 'all' || t.category === filter);
   }, [tasks, filter]);
 
-  const toggleTask = useCallback((id: string) => {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
+  const toggleTask = useCallback(async (id: string) => {
+    const task = tasks.find(t => t.id === id);
+    if (task) {
+      await updateDoc(doc(db, 'tasks', id), { done: !task.done });
+    }
+  }, [tasks]);
+
+  const moveTask = useCallback(async (id: string, newDate: Date) => {
+    await updateDoc(doc(db, 'tasks', id), { date: format(newDate, 'yyyy-MM-dd') });
   }, []);
 
-  const moveTask = useCallback((id: string, newDate: Date) => {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, date: format(newDate, 'yyyy-MM-dd') } : t));
-  }, []);
-
-  const deleteTask = useCallback((id: string) => {
+  const deleteTask = useCallback(async (id: string) => {
     if (confirm('Are you sure you want to delete this task?')) {
-      setTasks(prev => prev.filter(t => t.id !== id));
+      await deleteDoc(doc(db, 'tasks', id));
     }
   }, []);
 
-  const handleSaveTask = useCallback((taskData: Partial<Task>) => {
+  const handleSaveTask = useCallback(async (taskData: Partial<Task>) => {
+    if (!user) return;
+
     if (editingTask) {
-      setTasks(prev => prev.map(t => t.id === editingTask.id ? { ...t, ...taskData } as Task : t));
+      await updateDoc(doc(db, 'tasks', editingTask.id), { ...taskData });
     } else {
-      const newTask: Task = {
-        id: crypto.randomUUID(),
+      const id = crypto.randomUUID();
+      const newTask: any = {
+        id,
         title: taskData.title || '',
         notes: taskData.notes || '',
         category: taskData.category || 'job',
         phase: taskData.phase || 'Stabilize',
         date: taskData.date || format(new Date(), 'yyyy-MM-dd'),
         done: false,
+        userId: user.uid,
+        order: tasks.length
       };
-      setTasks(prev => [...prev, newTask]);
+      await setDoc(doc(db, 'tasks', id), newTask);
     }
     setIsModalOpen(false);
     setEditingTask(null);
-  }, [editingTask]);
+  }, [editingTask, user, tasks.length]);
 
   const extendCalendar = useCallback(() => {
     setEndDate(prev => addMonths(prev, 1));
@@ -425,49 +499,43 @@ export default function App() {
     URL.revokeObjectURL(url);
   }, [tasks]);
 
-  const importTasks = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+  const importTasks = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file || !user) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const content = e.target?.result as string;
         const importedTasks = JSON.parse(content);
         
         if (Array.isArray(importedTasks)) {
-          // Basic validation: check if first item has required fields
-          if (importedTasks.length > 0) {
-            const first = importedTasks[0];
-            if (!first.id || !first.title || !first.category || !first.date) {
-              throw new Error('Invalid task format');
+          if (confirm(`Are you sure you want to import ${importedTasks.length} tasks?`)) {
+            for (const t of importedTasks) {
+              const id = t.id || crypto.randomUUID();
+              await setDoc(doc(db, 'tasks', id), {
+                ...t,
+                id,
+                userId: user.uid,
+                done: !!t.done
+              });
             }
-          }
-          
-          if (confirm(`Are you sure you want to import ${importedTasks.length} tasks? This will merge with your current tasks.`)) {
-            setTasks(prev => {
-              // Avoid duplicates by ID
-              const existingIds = new Set(prev.map(t => t.id));
-              const newTasks = importedTasks.filter(t => !existingIds.has(t.id));
-              return [...prev, ...newTasks];
-            });
           }
         }
       } catch (err) {
-        alert('Failed to import tasks. Please ensure the file is a valid YouSquared export.');
+        alert('Failed to import tasks.');
         console.error(err);
       }
     };
     reader.readAsText(file);
-    // Reset input
     event.target.value = '';
-  }, []);
+  }, [user]);
 
   const nextWeek = useCallback(() => setCurrentDate(prev => addWeeks(prev, 1)), []);
   const prevWeek = useCallback(() => setCurrentDate(prev => subWeeks(prev, 1)), []);
   const goToToday = useCallback(() => setCurrentDate(new Date()), []);
 
-  const onDragEnd = useCallback((result: DropResult) => {
+  const onDragEnd = useCallback(async (result: DropResult) => {
     const { destination, source, draggableId } = result;
 
     if (!destination) return;
@@ -482,41 +550,19 @@ export default function App() {
     const taskId = draggableId;
     const newDate = destination.droppableId;
     
-    // Update state immediately to prevent the "flash" glitch
-    setTasks(prev => {
-      const taskIndex = prev.findIndex(t => t.id === taskId);
-      if (taskIndex === -1) return prev;
-      
-      const newTasks = [...prev];
-      const [task] = newTasks.splice(taskIndex, 1);
-      const updatedTask = { ...task, date: newDate };
-      
-      // Find the correct insertion point in the global list, 
-      // accounting for the current filter
-      const dayFilteredTasks = prev.filter(t => 
-        t.date === newDate && 
-        t.id !== taskId && 
-        (filter === 'all' || t.category === filter)
-      );
-
-      if (destination.index >= dayFilteredTasks.length) {
-        return [...newTasks, updatedTask];
-      } else {
-        const targetTask = dayFilteredTasks[destination.index];
-        const targetIndex = newTasks.findIndex(t => t.id === targetTask.id);
-        newTasks.splice(targetIndex, 0, updatedTask);
-        return newTasks;
-      }
+    // Optimistic UI update (optional, but good for feel)
+    // For now, let's just update Firestore and let onSnapshot handle it
+    await updateDoc(doc(db, 'tasks', taskId), { 
+      date: newDate,
+      order: destination.index // Simplistic ordering
     });
 
-    // Force pointer events and reflow immediately after state update
-    // to ensure the UI remains interactive without the "frozen" issue.
     document.body.style.pointerEvents = 'auto';
     requestAnimationFrame(() => {
       window.scrollBy(0, 1);
       window.scrollBy(0, -1);
     });
-  }, [filter]);
+  }, []);
 
   const onEditTask = useCallback((t: Task) => {
     setEditingTask(t);
@@ -525,6 +571,43 @@ export default function App() {
 
   const totalDays = differenceInDays(endDate, parseISO(INITIAL_DATA.startDate)) + 1;
   const currentProgress = Math.round((tasks.filter(t => t.done).length / tasks.length) * 100);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#191102] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-[#d6aa55] border-t-transparent rounded-full animate-spin" />
+          <p className="text-[#d6aa55] font-bold uppercase tracking-widest text-xs">Loading Transformation...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#191102] flex items-center justify-center p-6">
+        <div className="max-w-md w-full text-center space-y-8">
+          <div className="w-20 h-20 bg-[#d6aa55] rounded-2xl flex items-center justify-center shadow-2xl shadow-[#d6aa55]/20 mx-auto">
+            <span className="text-white font-bold text-4xl">G</span>
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-4xl font-bold tracking-tight">YouSquared</h1>
+            <p className="text-white/40 uppercase tracking-[0.3em] text-xs font-medium">90-Day Transformation</p>
+          </div>
+          <p className="text-white/60 text-sm leading-relaxed">
+            Your journey to the best version of yourself starts here. Sign in to sync your progress across all your devices.
+          </p>
+          <button 
+            onClick={login}
+            className="w-full py-4 bg-white text-[#191102] font-bold rounded-xl hover:bg-white/90 transition-all flex items-center justify-center gap-3 shadow-xl"
+          >
+            <LogIn className="w-5 h-5" />
+            Sign in with Google
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <DragDropContext onDragEnd={onDragEnd}>
@@ -597,6 +680,15 @@ export default function App() {
                 </button>
               ))}
             </div>
+
+            <button 
+              onClick={logout}
+              className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/40 hover:text-red-400"
+              title="Logout"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+
               <button 
                 onClick={() => { setEditingTask(null); setDefaultDate(undefined); setIsModalOpen(true); }}
                 className="w-10 h-10 bg-[#d6aa55] text-[#191102] rounded-lg flex items-center justify-center shadow-lg shadow-[#d6aa55]/20"

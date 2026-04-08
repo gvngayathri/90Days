@@ -9,6 +9,8 @@ export interface Task {
   date: string; // ISO format YYYY-MM-DD
   done: boolean;
   phase: Phase;
+  userId?: string;
+  order?: number;
 }
 
 export interface DashboardData {
