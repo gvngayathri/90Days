@@ -52,6 +52,8 @@ import {
   auth, 
   googleProvider, 
   signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
   collection,
   doc,
@@ -61,7 +63,8 @@ import {
   onSnapshot,
   query,
   where,
-  orderBy
+  orderBy,
+  writeBatch
 } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
@@ -382,6 +385,12 @@ export default function App() {
       setUser(currentUser);
       setLoading(false);
     });
+
+    // Check for redirect result on mount (important for mobile login)
+    getRedirectResult(auth).catch((error) => {
+      console.error("Redirect Login Error:", error);
+    });
+
     return () => unsubscribe();
   }, []);
 
@@ -413,9 +422,26 @@ export default function App() {
 
   const login = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error) {
+      // On mobile, popups are often blocked. Try popup first, then fallback to redirect.
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      
+      if (isMobile) {
+        await signInWithRedirect(auth, googleProvider);
+      } else {
+        try {
+          await signInWithPopup(auth, googleProvider);
+        } catch (popupError: any) {
+          // If popup is blocked or fails, fallback to redirect
+          if (popupError.code === 'auth/popup-blocked' || popupError.code === 'auth/cancelled-by-user') {
+            await signInWithRedirect(auth, googleProvider);
+          } else {
+            throw popupError;
+          }
+        }
+      }
+    } catch (error: any) {
       console.error("Login Error:", error);
+      alert(`Login failed: ${error.message}. Please ensure your domain is authorized in Firebase Console.`);
     }
   };
 
@@ -535,6 +561,32 @@ export default function App() {
   const prevWeek = useCallback(() => setCurrentDate(prev => subWeeks(prev, 1)), []);
   const goToToday = useCallback(() => setCurrentDate(new Date()), []);
 
+  const seedInitialData = useCallback(async () => {
+    if (!user) return;
+    
+    if (confirm('This will load the pre-set 90-day transformation plan into your account. Continue?')) {
+      const batch = writeBatch(db);
+      
+      INITIAL_DATA.tasks.forEach((task, index) => {
+        const docRef = doc(collection(db, 'tasks'), task.id);
+        batch.set(docRef, {
+          ...task,
+          userId: user.uid,
+          done: false,
+          order: index
+        });
+      });
+      
+      try {
+        await batch.commit();
+        alert('90-Day Plan loaded successfully!');
+      } catch (error) {
+        console.error("Error seeding data:", error);
+        alert('Failed to load plan. Please try again.');
+      }
+    }
+  }, [user]);
+
   const onDragEnd = useCallback(async (result: DropResult) => {
     const { destination, source, draggableId } = result;
 
@@ -650,6 +702,17 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
+            {user && tasks.length === 0 && (
+              <button 
+                onClick={seedInitialData}
+                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-[#d6aa55]/10 hover:bg-[#d6aa55]/20 border border-[#d6aa55]/20 rounded-lg text-[#d6aa55] text-[9px] sm:text-[10px] font-bold uppercase tracking-widest transition-all"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span className="hidden xs:inline">Load 90-Day Plan</span>
+                <span className="xs:hidden">Load Plan</span>
+              </button>
+            )}
+
             <div className="hidden lg:flex items-center gap-2 bg-white/5 rounded-lg p-1 border border-white/10 mr-2">
               <button 
                 onClick={exportTasks}
